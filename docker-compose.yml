@@ -1,0 +1,6 @@
+version: "3.9"
+services:
+  rvoicehook:
+    build: .
+    volumes:
+      - ./out:/out

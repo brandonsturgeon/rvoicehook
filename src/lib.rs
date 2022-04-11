@@ -70,7 +70,7 @@ struct LinkMap32 {
 
 extern "C" fn enable_hook(L: *mut lua_State) -> c_int {
     unsafe {
-        let path_to_lib = "bin/engine_srv.so";
+        let path_to_lib = "bin/linux64/engine.so";
         let lib = match unix_lib::Library::open(Some(path_to_lib), RTLD_LAZY | RTLD_NOLOAD) {
             Ok(lib) => lib,
             _ => {
