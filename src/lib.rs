@@ -26,8 +26,19 @@ unsafe fn voice_hook_run(L: *mut lua_State, slot: i32, data: &[u8]) {
     let data_i8 = unsafe { &*(data as *const _  as *const [i8]) };
     lua_pushlstring(L, data_i8.as_ptr(), data_i8.len() as _);
     // 3 arg, 0 result
-    let res = lua_pcall(L, 3, 0, 0);
+    let res = lua_call(L, 3, 0);
     lua_pop!(L, 1); // pop "hook"
+}
+
+unsafe fn lua_print(L: *mut lua_State, msg: &str) {
+    static C_PRINT: &str = "print\0";
+
+    lua_getglobal!(L, unsafe { C_PRINT.as_ptr() as *const c_char });
+    lua_pushstring(L, unsafe { msg.as_ptr() as *const c_char });
+
+    // 1 arg, 0 result
+    let res = lua_pcall(L, 1, 0, 0);
+    lua_pop!(L, 1); // pop "print"
 }
 
 type EngineBroadcastVoice = unsafe extern "C" fn(*mut c_void, c_int, *const u8, i64);
@@ -48,7 +59,7 @@ extern "C" fn voice_detour(client: *mut c_void, byte_count: c_int, data: *const 
         steam_decoder::process(&slice, &mut decomp);
 
         let slot = unsafe { player_slot.unwrap()(client) };
-        
+
         unsafe {
             if let Some(ref L) = lstate {
                 voice_hook_run(*L, slot, &decomp);
@@ -64,8 +75,8 @@ const RTLD_LAZY: c_int = 0x00001;
 const RTLD_NOLOAD: c_int = 0x00004;
 
 #[repr(C)]
-struct LinkMap32 {
-    addr: u32
+struct LinkMap64 {
+    addr: u64
 }
 
 extern "C" fn enable_hook(L: *mut lua_State) -> c_int {
@@ -76,12 +87,12 @@ extern "C" fn enable_hook(L: *mut lua_State) -> c_int {
             _ => {
                 lua_pushboolean(L, 0);
                 lua_pushstring(L, CString::new(format!("cannot find engine from {}", path_to_lib)).unwrap().as_ptr());
-                return 2
+                return 2;
             }
         };
 
         let ptr = lib.into_raw();
-        let data: *const LinkMap32 = unsafe { ptr as *const LinkMap32 };
+        let data: *const LinkMap64 = unsafe { ptr as *const LinkMap64 };
 
         let lib_bytes = std::fs::read(path_to_lib).unwrap();
         let elf = goblin::elf::Elf::parse(&lib_bytes[..]).unwrap();
@@ -90,6 +101,16 @@ extern "C" fn enable_hook(L: *mut lua_State) -> c_int {
 
         for syn in elf.syms.iter() {
             let name = elf.strtab.get(syn.st_name).unwrap().unwrap();
+
+            unsafe {
+                let mut owned_name = "Syn in elf (name): ".to_string();
+                let ending = "\0".to_string();
+
+                owned_name.push_str(&name.to_string());
+                owned_name.push_str(&ending);
+
+                lua_print(L, &owned_name);
+            }
 
             if name == "_Z21SV_BroadcastVoiceDataP7IClientiPcx" {
                 let ptr = ((*data).addr as usize + syn.st_value as usize);
@@ -109,8 +130,9 @@ extern "C" fn enable_hook(L: *mut lua_State) -> c_int {
         }
 
         lua_pushboolean(L, if n == 2 { 1} else { 0 });
-        1
+        return 1
     }
+    return 1
 }
 
 extern "C" fn disable(L: *mut lua_State) -> c_int {
@@ -162,6 +184,7 @@ pub unsafe extern "C" fn gmod13_open(L: *mut lua_State) -> c_int {
         lua_pushnumber(L, 3.0);
         lua_setfield(L, -2, CString::new("Version").unwrap().as_ptr());
     }
+
     glua_register_to_table(L, -2, "Enable", enable_hook);
     glua_register_to_table(L, -2, "Disable", disable);
     glua_setglobal(L, "rvoicehook");
@@ -174,7 +197,7 @@ pub extern "C" fn gmod13_close(L: *mut lua_State) -> c_int {
     unsafe {
         lstate = None;
     }
-    
+
     disable(L);
     0
 }
